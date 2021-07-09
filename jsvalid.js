@@ -1,6 +1,6 @@
 // jsvalid.js
 // James Diacono
-// 2021-06-29
+// 2021-07-18
 
 // Public Domain
 
@@ -12,6 +12,7 @@ const violation_messages = {
     out_of_bounds: "Out of bounds.",
     wrong_pattern: "Wrong pattern.",
     missing_property_a: "Missing property '{a}'.",
+    unexpected_classification_a: "Unexpected classification '{a}'.",
     unexpected_element: "Unexpected element.",
     unexpected_property_a: "Unexpected property '{a}'."
 };
@@ -194,8 +195,29 @@ function property(key, validator) {
     };
 }
 
-function wun_of(validators) {
+function wun_of(validators, classifier) {
     return function (subject) {
+        if (classifier !== undefined) {
+            let key;
+
+// The classifier might make reckless assumptions about the structure of the
+// subject, which is perfectly fine.
+
+            try {
+                key = classifier(subject);
+            } catch (ignore) {}
+            if (
+                (typeof key === "string" || Number.isFinite(key)) &&
+                Object.keys(validators).includes(String(key))
+            ) {
+                return euphemize(validators[key])(subject);
+            }
+            return report_fail("unexpected_classification_a", key);
+        }
+
+// No classifier function has been provided. We blindly try each validator until
+// wun fits.
+
         const accumulated_violations = [];
         const pass = validators.map(euphemize).some(function (validator) {
             const report = validator(subject);

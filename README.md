@@ -185,6 +185,27 @@ The __wun_of__ validator permits only values which conform to at least wun of th
 
 A definition of the word "wun" may be found [here](http://howjavascriptworks.com/sample.html).
 
+### valid.wun_of(_validator_object_, _classifier_)
+
+The appropriate validator is chosen according to some characteric of the subject. This can produce a more focused report.
+
+The _validator_object_ contains the validators. The property names are the classifications. The _classifier_ function is called with the subject, and ideally returns a classification string (or number). The _classifier_ may indicate that the subject is unclassifiable by throwing an exception or returning a value which is not a string (or number).
+
+The subject is permitted if it classifies as and conforms to wun of the validators.
+
+    function valid_mail() {
+        return valid.wun_of(
+            {
+                letter: valid_letter(),
+                parcel: valid_parcel(),
+                postcard: valid_postcard()
+            },
+            function classifier(subject) {
+                return subject.size;
+            }
+        );
+    }
+
 ### valid.all_of(_validator_array_, _exhaustive_)
 
 The __all_of__ validator permits only values which conform to every validator in the _validator_array_. It runs the validators in sequence, stopping at the first violation (unless _exhaustive_ is `true`).

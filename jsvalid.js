@@ -12,7 +12,6 @@ const violation_messages = {
     out_of_bounds: "Out of bounds.",
     wrong_pattern: "Wrong pattern.",
     missing_property_a: "Missing property '{a}'.",
-    unknown_key_a: "Unknown key '{a}'.",
     unexpected_element: "Unexpected element.",
     unexpected_property_a: "Unexpected property '{a}'."
 };
@@ -156,20 +155,17 @@ function euphemize(value) {
 
 function all_of(validators, exhaustive = false) {
     return function (subject) {
-        let reports = [];
+        let violations = [];
         validators.some(function (validator) {
             const report = validator(subject);
-            reports.push(report);
+            violations.push(...report.violations);
             const stop_now = (
                 exhaustive === false &&
-                report.violations.length > 0
+                violations.length > 0
             );
             return stop_now;
         });
-        return {
-            violations: reports.map((report) => report.violations).flat(),
-            reports
-        };
+        return {violations};
     };
 }
 
@@ -193,8 +189,7 @@ function property(key, validator) {
                         : [key].concat(violation.path)
                     )
                 });
-            }),
-            reports: [report]
+            })
         };
     };
 }
@@ -342,18 +337,10 @@ function array(
     ]);
 }
 
-function object(...args) {
-    if (args.length === 0) {
-
-// If 'object' is called with no arguments, the subject's properties are
-// ignored.
-
-        return object(any(), any());
-    }
+function object(zeroth, wunth, allow_strays = false) {
     function heterogeneous_validator(subject) {
-        const required_properties = coalesce(args[0], {});
-        const optional_properties = coalesce(args[1], {});
-        const allow_strays = coalesce(args[2], false);
+        const required_properties = coalesce(zeroth, {});
+        const optional_properties = coalesce(wunth, {});
         function property_values(validators_object) {
             return all_of(
                 Object.keys(validators_object).map(function (key) {
@@ -397,24 +384,23 @@ function object(...args) {
         ], true)(subject);
     }
     function homogenous_validator(subject) {
-        const key_validator = coalesce(args[0], any());
-        const value_validator = coalesce(args[1], any());
-        const property_validators = Object.keys(
-            subject
-        ).map(function make_property_validator(key) {
+        const key_validator = coalesce(zeroth, any());
+        const value_validator = coalesce(wunth, any());
+        return all_of(
+            Object.keys(subject).map(function (key) {
 
-// Returns a validator which validates both the key and the value of a property.
+// Returns a validator which validates both the key and the value of a single
+// property.
 
-            return function property_validator(subject) {
                 return all_of([
                     function (ignore) {
                         return euphemize(key_validator)(key);
                     },
                     property(key, value_validator)
-                ], true)(subject);
-            };
-        });
-        return all_of(property_validators, true)(subject);
+                ], true);
+            }),
+            true
+        )(subject);
     }
     return all_of([
         function object_validator(subject) {
@@ -426,8 +412,8 @@ function object(...args) {
         },
         (
             (
-                is_object(args[0]) ||
-                is_object(args[1])
+                is_object(zeroth) ||
+                is_object(wunth)
             )
             ? heterogeneous_validator
             : homogenous_validator
@@ -437,22 +423,20 @@ function object(...args) {
 
 export default Object.freeze({
 
-// Each of JSCheck's specifiers are complemented by validator factories, with
-// the exception of 'character' and 'falsy' (which are not very useful) and
+// Each of JSCheck's specifiers have a corresponding validator, with the
+// exception of 'character' and 'falsy' (which are not very useful) and
 // 'sequence' (which is stateful).
-
-    any,
 
     boolean,
     number,
     integer,
     string,
     function: fn,
+    array,
+    object,
 
-    literal,
     wun_of,
     all_of,
-
-    array,
-    object
+    literal,
+    any
 });

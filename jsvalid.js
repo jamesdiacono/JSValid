@@ -1,20 +1,20 @@
 // jsvalid.js
 // James Diacono
-// 2021-07-18
+// 2022-05-15
 
 // Public Domain
 
 const violation_messages = {
-    not_type_a: "Not of type {a}.",
-    not_wun_of: "Not a valid option.",
+    missing_property_a: "Missing property '{a}'.",
     not_equal_to_a: "Not equal to '{a}'.",
     not_finite: "Not a finite number.",
+    not_type_a: "Not of type {a}.",
+    not_wun_of: "Not a valid option.",
     out_of_bounds: "Out of bounds.",
-    wrong_pattern: "Wrong pattern.",
-    missing_property_a: "Missing property '{a}'.",
+    unexpected: "Unexpected.",
     unexpected_classification_a: "Unexpected classification '{a}'.",
-    unexpected_element: "Unexpected element.",
-    unexpected_property_a: "Unexpected property '{a}'."
+    unexpected_property_a: "Unexpected property '{a}'.",
+    wrong_pattern: "Wrong pattern."
 };
 
 function interpolate(template, container) {
@@ -43,86 +43,43 @@ function coalesce(left, right) {
 }
 
 function make_violation(code, ...exhibits) {
-    const exhibits_object = exhibits.reduce(function (
-        object,
-        exhibit,
-        exhibit_nr
-    ) {
-
-// The exhibit names are "a", "b", etc.
-
-        const exhibit_name = String.fromCharCode(97 + exhibit_nr);
-        object[exhibit_name] = exhibit;
-        return object;
-    }, {});
-    return Object.assign(
-        {
-            message: interpolate(violation_messages[code], exhibits_object),
-            code
-        },
-        exhibits_object
-    );
-}
-
-function report_pass() {
-
-// Returns a successful report.
-
-    return {
-        violations: []
+    let violation = {
+        message: interpolate(
+            violation_messages[code],
+            {a: exhibits[0]}
+        ),
+        code
     };
-}
-
-function report_fail(...args) {
-
-// Returns an unsuccessful report containing a single violation.
-
-    return {
-        violations: [make_violation(...args)]
-    };
-}
-
-function typeof_as_a_function(value) {
-
-// Wrapping typeof in a function avoids a JSLint warning (it always expects a
-// string literal on the right side of typeof).
-
-    return typeof value;
+    if (exhibits.length > 0) {
+        violation.a = exhibits[0];
+    }
+    return violation;
 }
 
 function is_object(value) {
     return (
-        typeof value === "object" &&
-        value !== null &&
-        !Array.isArray(value)
+        Boolean(value)
+        && typeof value === "object"
+        && !Array.isArray(value)
     );
 }
 
 // The validator factories. ////////////////////////////////////////////////////
 
-function type(type) {
+function type(expected_type) {
     return function (subject) {
+        const subject_type = typeof subject;
         return (
-            typeof_as_a_function(subject) !== type
-            ? report_fail("not_type_a", type)
-            : report_pass()
+            subject_type !== expected_type
+            ? [make_violation("not_type_a", expected_type)]
+            : []
         );
     };
 }
 
 function any() {
     return function () {
-        return report_pass();
-    };
-}
-
-
-function none(...args) {
-
-// Refuses all values.
-
-    return function () {
-        return report_fail(...args);
+        return [];
     };
 }
 
@@ -130,14 +87,12 @@ function literal(expected) {
     return function (subject) {
         return (
             (
-                subject === expected ||
-                (
-                    Number.isNaN(expected) &&
-                    Number.isNaN(subject)
+                subject === expected || (
+                    Number.isNaN(expected) && Number.isNaN(subject)
                 )
             )
-            ? report_pass()
-            : report_fail("not_equal_to_a", expected)
+            ? []
+            : [make_violation("not_equal_to_a", expected)]
         );
     };
 }
@@ -154,19 +109,29 @@ function euphemize(value) {
     );
 }
 
+function not(validator) {
+    return function (subject) {
+        return (
+            euphemize(validator)(subject).length > 0
+            ? []
+            : [make_violation("unexpected")]
+        );
+    };
+}
+
 function all_of(validators, exhaustive = false) {
     return function (subject) {
-        let violations = [];
+        let all_violations = [];
         validators.some(function (validator) {
-            const report = validator(subject);
-            violations.push(...report.violations);
+            const violations = validator(subject);
+            all_violations.push(...violations);
             const stop_now = (
-                exhaustive === false &&
-                violations.length > 0
+                exhaustive === false
+                && violations.length > 0
             );
             return stop_now;
         });
-        return {violations};
+        return all_violations;
     };
 }
 
@@ -176,62 +141,55 @@ function property(key, validator) {
 // subject. The subject need not be an object, but an exception will be thrown
 // if it is null or undefined.
 
+    function prepend_key_to_path(violation) {
+        return Object.assign({}, violation, {
+            path: (
+                violation.path === undefined
+                ? [key]
+                : [key].concat(violation.path)
+            )
+        });
+    }
     return function (subject) {
-        const report = euphemize(validator)(subject[key]);
-        return {
-
-// Prepend the key to the path.
-
-            violations: report.violations.map(function (violation) {
-                return Object.assign({}, violation, {
-                    path: (
-                        violation.path === undefined
-                        ? [key]
-                        : [key].concat(violation.path)
-                    )
-                });
-            })
-        };
+        return euphemize(validator)(subject[key]).map(prepend_key_to_path);
     };
 }
 
 function wun_of(validators, classifier) {
-    return function (subject) {
-        if (classifier !== undefined) {
+    if (classifier !== undefined) {
+        return function classified_validator(subject) {
             let key;
-
-// The classifier might make reckless assumptions about the structure of the
-// subject, which is perfectly fine.
-
             try {
                 key = classifier(subject);
-            } catch (ignore) {}
+            } catch (ignore) {
+
+// The classifier might have made reckless assumptions about the structure of
+// the subject, which is perfectly fine.
+
+            }
             if (
-                (typeof key === "string" || Number.isFinite(key)) &&
-                Object.keys(validators).includes(String(key))
+                (typeof key === "string" || Number.isFinite(key))
+                && Object.keys(validators).includes(String(key))
             ) {
                 return euphemize(validators[key])(subject);
             }
-            return report_fail("unexpected_classification_a", key);
-        }
+            return [make_violation("unexpected_classification_a", key)];
+        };
+    }
+    return function (subject) {
 
-// No classifier function has been provided. We blindly try each validator until
-// wun fits.
+// No classifier function was provided. We take a brute force approach, applying
+// each validator until wun fits.
 
-        const accumulated_violations = [];
-        const pass = validators.map(euphemize).some(function (validator) {
-            const report = validator(subject);
-            accumulated_violations.push(...report.violations);
-            return report.violations.length === 0;
-        });
+        let all_violations = [];
         return (
-            pass
-            ? report_pass()
-            : {
-                violations: [make_violation("not_wun_of")].concat(
-                    accumulated_violations
-                )
-            }
+            validators.map(euphemize).some(function (validator) {
+                const violations = validator(subject);
+                all_violations.push(...violations);
+                return violations.length === 0;
+            })
+            ? []
+            : [make_violation("not_wun_of"), ...all_violations]
         );
     };
 }
@@ -240,24 +198,40 @@ function boolean() {
     return type("boolean");
 }
 
-function number(minimum, maximum) {
+function number(
+    minimum,
+    maximum,
+    exclude_minimum = false,
+    exclude_maximum = false
+) {
     return all_of([
         type("number"),
         function finite_validator(subject) {
             return (
                 !Number.isFinite(subject)
-                ? report_fail("not_finite")
-                : report_pass()
+                ? [make_violation("not_finite")]
+                : []
             );
         },
         function bounds_validator(subject) {
             return (
                 (
-                    (minimum !== undefined && subject < minimum) ||
-                    (maximum !== undefined && subject > maximum)
+                    (
+                        minimum !== undefined && (
+                            exclude_minimum
+                            ? subject <= minimum
+                            : subject < minimum
+                        )
+                    ) || (
+                        maximum !== undefined && (
+                            exclude_maximum
+                            ? subject >= maximum
+                            : subject > maximum
+                        )
+                    )
                 )
-                ? report_fail("out_of_bounds")
-                : report_pass()
+                ? [make_violation("out_of_bounds")]
+                : []
             );
         }
     ]);
@@ -268,8 +242,8 @@ function integer(minimum, maximum) {
         function integer_validator(subject) {
             return (
                 !Number.isSafeInteger(subject)
-                ? report_fail("not_type_a", "integer")
-                : report_pass()
+                ? [make_violation("not_type_a", "integer")]
+                : []
             );
         },
         number(minimum, maximum)
@@ -287,8 +261,8 @@ function string(argument) {
                 ? function pattern_validator(subject) {
                     return (
                         argument.test(subject)
-                        ? report_pass()
-                        : report_fail("wrong_pattern")
+                        ? []
+                        : [make_violation("wrong_pattern")]
                     );
                 }
                 : property("length", argument)
@@ -342,8 +316,8 @@ function array(
         function array_validator(subject) {
             return (
                 !Array.isArray(subject)
-                ? report_fail("not_type_a", "array")
-                : report_pass()
+                ? [make_violation("not_type_a", "array")]
+                : []
             );
         },
         property("length", length_validator),
@@ -366,44 +340,49 @@ function object(zeroth, wunth, allow_strays = false) {
         function property_values(validators_object) {
             return all_of(
                 Object.keys(validators_object).map(function (key) {
-                    return property(
-                        key,
-                        (
-                            Object.keys(subject).includes(key)
-                            ? euphemize(validators_object[key])
-                            : any()
-                        )
+                    return (
+                        Object.keys(subject).includes(key)
+                        ? property(key, euphemize(validators_object[key]))
+                        : any()
                     );
                 }),
                 true
             );
         }
-        return all_of([
-            all_of(
-                Object.keys(
-                    required_properties
-                ).filter(function is_missing(key) {
-                    return !Object.keys(subject).includes(key);
-                }).map(function (key) {
-                    return none("missing_property_a", key);
-                }),
-                true
-            ),
-            property_values(required_properties),
-            property_values(optional_properties),
-            all_of(
-                Object.keys(subject).filter(function is_stray(key) {
-                    return (
-                        !allow_strays &&
-                        !Object.keys(required_properties).includes(key) &&
-                        !Object.keys(optional_properties).includes(key)
-                    );
-                }).map(function (key) {
-                    return none("unexpected_property_a", key);
-                }),
-                true
-            )
-        ], true)(subject);
+        function required_properties_validator(ignore) {
+            return Object.keys(
+                required_properties
+            ).filter(function is_missing(key) {
+                return !Object.keys(subject).includes(key);
+            }).map(function (key) {
+                return make_violation("missing_property_a", key);
+            });
+        }
+        function stray_properties_validator(ignore) {
+            return Object.keys(
+                subject
+            ).filter(function is_stray(key) {
+                return (
+                    !Object.keys(required_properties).includes(key)
+                    && !Object.keys(optional_properties).includes(key)
+                );
+            }).map(function (key) {
+                return make_violation("unexpected_property_a", key);
+            });
+        }
+        return all_of(
+            [
+                required_properties_validator,
+                property_values(required_properties),
+                property_values(optional_properties),
+                (
+                    allow_strays
+                    ? any()
+                    : stray_properties_validator
+                )
+            ],
+            true
+        )(subject);
     }
     function homogenous_validator(subject) {
         const key_validator = coalesce(zeroth, any());
@@ -428,15 +407,12 @@ function object(zeroth, wunth, allow_strays = false) {
         function object_validator(subject) {
             return (
                 is_object(subject)
-                ? report_pass()
-                : report_fail("not_type_a", "object")
+                ? []
+                : [make_violation("not_type_a", "object")]
             );
         },
         (
-            (
-                is_object(zeroth) ||
-                is_object(wunth)
-            )
+            (is_object(zeroth) || is_object(wunth))
             ? heterogeneous_validator
             : homogenous_validator
         )
@@ -446,8 +422,8 @@ function object(zeroth, wunth, allow_strays = false) {
 export default Object.freeze({
 
 // Each of JSCheck's specifiers have a corresponding validator, with the
-// exception of 'character' and 'falsy' (which are not very useful) and
-// 'sequence' (which is stateful).
+// exception of 'character' and 'falsy', which are not very useful, and
+// 'sequence', which is stateful.
 
     boolean,
     number,
@@ -459,6 +435,7 @@ export default Object.freeze({
 
     wun_of,
     all_of,
+    not,
     literal,
     any
 });

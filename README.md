@@ -147,8 +147,6 @@ The _required_properties_ and _optional_properties_ parameters are objects conta
 
 The value of each property on the subject must conform to the corresponding validator in _required_properties_ or _optional_properties_. Where no corresponding validator is found, the property is permitted only if _allow_strays_ is `true`. Additionally, the subject must contain every key found on _required_properties_.
 
-`Object.keys` is used to enumerate the subject's properties, as well as the validators in _required_properties_ and _optional_properties_.
-
     function valid_parcel() {
         return valid.object(
             {

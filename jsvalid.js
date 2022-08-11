@@ -1,6 +1,6 @@
 // jsvalid.js
 // James Diacono
-// 2022-05-15
+// 2022-08-11
 
 // Public Domain
 
@@ -16,9 +16,10 @@ const violation_messages = {
     unexpected_property_a: "Unexpected property '{a}'.",
     wrong_pattern: "Wrong pattern."
 };
+const rx_variable = /\{([^{}]*)\}/g;
 
 function interpolate(template, container) {
-    return template.replace(/\{([^{}]*)\}/g, function (original, filling) {
+    return template.replace(rx_variable, function (original, filling) {
         try {
             return String(container[filling]);
         } catch (ignore) {
@@ -99,8 +100,7 @@ function literal(expected) {
 
 function euphemize(value) {
 
-// If 'value' is a not a function, it is wrapped in a "literal" validator. It is
-// like an inverse of JSCheck's "resolve" function.
+// If 'value' is a not a function, it is wrapped in a "literal" validator.
 
     return (
         typeof value === "function"
@@ -278,11 +278,7 @@ function fn(length_validator = any()) {
     ]);
 }
 
-function array(
-    validator_array,
-    length_validator,
-    rest_validator
-) {
+function array(validator_array, length_validator, rest_validator) {
     if (!Array.isArray(validator_array)) {
 
 // The case of a homogenous array is equivalent to that of a heterogeneous array
@@ -334,74 +330,85 @@ function array(
 }
 
 function object(zeroth, wunth, allow_strays = false) {
-    function heterogeneous_validator(subject) {
-        const required_properties = coalesce(zeroth, {});
-        const optional_properties = coalesce(wunth, {});
-        function property_values(validators_object) {
-            return all_of(
-                Object.keys(validators_object).map(function (key) {
-                    return (
-                        Object.keys(subject).includes(key)
-                        ? property(key, euphemize(validators_object[key]))
-                        : any()
-                    );
-                }),
-                true
-            );
-        }
-        function required_properties_validator(ignore) {
-            return Object.keys(
-                required_properties
-            ).filter(function is_missing(key) {
-                return !Object.keys(subject).includes(key);
-            }).map(function (key) {
-                return make_violation("missing_property_a", key);
-            });
-        }
-        function stray_properties_validator(ignore) {
-            return Object.keys(
-                subject
-            ).filter(function is_stray(key) {
-                return (
-                    !Object.keys(required_properties).includes(key)
-                    && !Object.keys(optional_properties).includes(key)
-                );
-            }).map(function (key) {
-                return make_violation("unexpected_property_a", key);
-            });
-        }
+    function heterogeneous() {
+        const required = coalesce(zeroth, {});
+        const optional = coalesce(wunth, {});
         return all_of(
             [
-                required_properties_validator,
-                property_values(required_properties),
-                property_values(optional_properties),
+                function required_properties_validator(subject) {
+
+// Required properties must exist directly on the subject, not just in its
+// prototype chain. This ensures that JSON representations of valid subjects
+// include all required properties.
+
+                    return Object.keys(required).reduce(function (array, key) {
+                        return array.concat(
+                            Object.keys(subject).includes(key)
+                            ? property(key, euphemize(required[key]))(subject)
+                            : make_violation("missing_property_a", key)
+                        );
+                    }, []);
+                },
+                function optional_properties_validator(subject) {
+
+// Optional properties are trickier. When an optional property is missing from
+// the subject, there remains the possibility that it is buried somewhere in
+// the prototype chain. If the value of such a property is invalid, it could
+// cause problems when dredged up by unsuspecting code.
+
+// To prevent this hazard, we simply access the optional property by name and
+// validate the resulting value. A side effect of this approach is that a
+// missing property is indistinguishable from a property with a value of
+// undefined. I am ambivalent about this.
+
+                    return Object.keys(optional).reduce(function (array, key) {
+                        return array.concat(
+                            subject[key] !== undefined
+                            ? property(key, euphemize(optional[key]))(subject)
+                            : []
+                        );
+                    }, []);
+                },
                 (
                     allow_strays
                     ? any()
-                    : stray_properties_validator
+                    : function stray_properties_validator(subject) {
+                        return Object.keys(
+                            subject
+                        ).filter(function is_stray(key) {
+                            return !(
+                                Object.keys(required).includes(key)
+                                || Object.keys(optional).includes(key)
+                            );
+                        }).map(function (key) {
+                            return make_violation("unexpected_property_a", key);
+                        });
+                    }
                 )
             ],
             true
-        )(subject);
+        );
     }
-    function homogenous_validator(subject) {
+    function homogenous() {
         const key_validator = coalesce(zeroth, any());
         const value_validator = coalesce(wunth, any());
-        return all_of(
-            Object.keys(subject).map(function (key) {
+        return function homogenous_validator(subject) {
+            return all_of(
+                Object.keys(subject).map(function (key) {
 
 // Returns a validator which validates both the key and the value of a single
 // property.
 
-                return all_of([
-                    function (ignore) {
-                        return euphemize(key_validator)(key);
-                    },
-                    property(key, value_validator)
-                ], true);
-            }),
-            true
-        )(subject);
+                    return all_of([
+                        function (ignore) {
+                            return euphemize(key_validator)(key);
+                        },
+                        property(key, value_validator)
+                    ], true);
+                }),
+                true
+            )(subject);
+        };
     }
     return all_of([
         function object_validator(subject) {
@@ -413,8 +420,8 @@ function object(zeroth, wunth, allow_strays = false) {
         },
         (
             (is_object(zeroth) || is_object(wunth))
-            ? heterogeneous_validator
-            : homogenous_validator
+            ? heterogeneous()
+            : homogenous()
         )
     ]);
 }

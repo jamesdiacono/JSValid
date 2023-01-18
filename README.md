@@ -1,6 +1,6 @@
 # JSValid
 
-JSValid is a functional approach to validation in JavaScript. It provides a composable means of expressing value constraints, and a simple mechanism for applying them.
+JSValid is a functional approach to validation in JavaScript. It provides a minimal, composable and extensible way to express and enforce value constraints.
 
 JSValid specifies the signature of a special kind of function, called a __validator__. Validators accept as a single argument the __subject__, which is the value to be validated, and return an array of violations. An empty array indicates a valid subject.
 
@@ -12,7 +12,7 @@ A __violation__ is an object with the following properties, of which only `messa
 - `a`: Exhibit A.
 - `b`: Exhibit B.
 
-A __factory__ is any function which returns a validator function. Here is a demonstration showing how factories, validators and violations work together.
+A __factory__ is any function that returns a validator function. Here is a demonstration showing how factories, validators and violations work together.
 
     // A validator is made by invoking a factory.
 
@@ -68,7 +68,7 @@ The __boolean__ validator permits only `true` and `false`.
 
 ### valid.number()
 
-The __number__ validator permits only numbers which satisfy `Number.isFinite`. This excludes `Infinity` and `NaN`.
+The __number__ validator permits only numbers that satisfy `Number.isFinite`. This excludes `Infinity` and `NaN`.
 
 ### valid.number(_minimum_, _maximum_, _exclude_minimum_, _exclude_maximum_)
 
@@ -86,7 +86,7 @@ Specifying either of _minimum_ or _maximum_ imposes bounds on the subject. Bound
 
 ### valid.integer()
 
-The __integer__ validator permits only numbers which satisfy `Number.isSafeInteger`.
+The __integer__ validator permits only numbers that satisfy `Number.isSafeInteger`.
 
 ### valid.integer(_minimum_, _maximum_)
 
@@ -172,7 +172,7 @@ All keys are permitted if the _key_validator_ is undefined. Likewise, all values
 
 ### valid.wun_of(_validator_array_)
 
-The __wun_of__ validator permits only values which conform to at least wun of the validators in the _validator_array_.
+The __wun_of__ validator permits only values that conform to at least wun of the validators in the _validator_array_.
 
     function valid_size() {
         return valid.wun_of(["letter", "parcel", "postcard"]);
@@ -184,7 +184,7 @@ A definition of the word "wun" may be found [here](http://howjavascriptworks.com
 
 The appropriate validator is chosen according to some characteric of the subject. This helps to produce a more compact violations array.
 
-The _validator_object_ contains the validators. The property names are the classifications. The _classifier_ function is called with the subject, and ideally returns a classification string (or number). The _classifier_ may indicate that the subject is unclassifiable by throwing an exception or returning a value which is not a string (or number).
+The _validator_object_ contains the validators. The property names are the classifications. The _classifier_ function is called with the subject, and ideally returns a classification string (or number). The _classifier_ may indicate that the subject is unclassifiable by throwing an exception or returning a value that is not a string (or number).
 
 The subject is permitted if it classifies as and conforms to wun of the validators.
 
@@ -203,17 +203,14 @@ The subject is permitted if it classifies as and conforms to wun of the validato
 
 ### valid.all_of(_validator_array_, _exhaustive_)
 
-The __all_of__ validator permits only values which conform to every validator in the _validator_array_. It runs the validators in sequence, stopping at the first violation (unless _exhaustive_ is `true`).
+The __all_of__ validator permits only values that conform to every validator in the _validator_array_. It runs the validators in sequence, stopping at the first violation (unless _exhaustive_ is `true`).
 
 ### valid.not(_validator_)
 
-The __not__ validator permits only values which do not conform to the _validator_.
+The __not__ validator permits only values that do not conform to the _validator_.
 
-    function valid_divisor() {
-        return valid.all_of([
-            valid.number(),
-            valid.not(0)
-        ]);
+    function valid_flat_mail() {
+        return valid.not(valid_parcel());
     }
 
 ### valid.literal(_expected_value_)
@@ -236,7 +233,7 @@ The __any__ validator permits any value.
 
 ## But what about...?
 
-It is easy to make your own validators. Here is a factory which returns a validator which permits only multiples of _n_.
+It is easy to make your own validators. Here is a factory that returns a validator that permits only multiples of _n_.
 
     function valid_multiple_of(n) {
         return function (subject) {

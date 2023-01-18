@@ -58,17 +58,24 @@ function make_violation(code, ...exhibits) {
 }
 
 function is_object(value) {
+    return value && typeof value === "object" && !Array.isArray(value);
+}
+
+function owns(object, key) {
+
+// This is several orders of magnitude faster than calling
+// Object.keys(object).includes(key) when the number of keys is large.
+
     return (
-        Boolean(value)
-        && typeof value === "object"
-        && !Array.isArray(value)
+        Object.prototype.hasOwnProperty.call(object, key)
+        && Object.prototype.propertyIsEnumerable.call(object, key)
     );
 }
 
 // The validator factories. ////////////////////////////////////////////////////
 
 function type(expected_type) {
-    return function (subject) {
+    return function type_validator(subject) {
         const subject_type = typeof subject;
         return (
             subject_type !== expected_type
@@ -79,13 +86,13 @@ function type(expected_type) {
 }
 
 function any() {
-    return function () {
+    return function any_validator() {
         return [];
     };
 }
 
 function literal(expected) {
-    return function (subject) {
+    return function literal_validator(subject) {
         return (
             (
                 subject === expected || (
@@ -110,7 +117,7 @@ function euphemize(value) {
 }
 
 function not(validator) {
-    return function (subject) {
+    return function not_validator(subject) {
         return (
             euphemize(validator)(subject).length > 0
             ? []
@@ -120,15 +127,12 @@ function not(validator) {
 }
 
 function all_of(validators, exhaustive = false) {
-    return function (subject) {
+    return function all_of_validator(subject) {
         let all_violations = [];
         validators.some(function (validator) {
             const violations = validator(subject);
-            all_violations.push(...violations);
-            const stop_now = (
-                exhaustive === false
-                && violations.length > 0
-            );
+            all_violations = all_violations.concat(violations);
+            const stop_now = (exhaustive === false && violations.length > 0);
             return stop_now;
         });
         return all_violations;
@@ -150,7 +154,8 @@ function property(key, validator) {
             )
         });
     }
-    return function (subject) {
+
+    return function property_validator(subject) {
         return euphemize(validator)(subject[key]).map(prepend_key_to_path);
     };
 }
@@ -169,14 +174,14 @@ function wun_of(validators, classifier) {
             }
             if (
                 (typeof key === "string" || Number.isFinite(key))
-                && Object.keys(validators).includes(String(key))
+                && owns(validators, String(key))
             ) {
                 return euphemize(validators[key])(subject);
             }
             return [make_violation("unexpected_classification_a", key)];
         };
     }
-    return function (subject) {
+    return function wun_of_validator(subject) {
 
 // No classifier function was provided. We take a brute force approach, applying
 // each validator until wun fits.
@@ -185,7 +190,7 @@ function wun_of(validators, classifier) {
         return (
             validators.map(euphemize).some(function (validator) {
                 const violations = validator(subject);
-                all_violations.push(...violations);
+                all_violations = all_violations.concat(violations);
                 return violations.length === 0;
             })
             ? []
@@ -206,14 +211,10 @@ function number(
 ) {
     return all_of([
         type("number"),
-        function finite_validator(subject) {
-            return (
-                !Number.isFinite(subject)
-                ? [make_violation("not_finite")]
-                : []
-            );
-        },
-        function bounds_validator(subject) {
+        function number_validator(subject) {
+            if (!Number.isFinite(subject)) {
+                return [make_violation("not_finite")];
+            }
             return (
                 (
                     (
@@ -293,7 +294,8 @@ function array(validator_array, length_validator, rest_validator) {
     if (length_validator === undefined) {
         length_validator = validator_array.length;
     }
-    function find_validator(element_nr) {
+
+    function validator_at(element_nr) {
 
 // Returns the validator for an element at the specified position in the subject
 // array.
@@ -308,6 +310,7 @@ function array(validator_array, length_validator, rest_validator) {
             )
         );
     }
+
     return all_of([
         function array_validator(subject) {
             return (
@@ -320,7 +323,7 @@ function array(validator_array, length_validator, rest_validator) {
         function elements_validator(subject) {
             return all_of(
                 subject.map(function (ignore, element_nr) {
-                    const validator = euphemize(find_validator(element_nr));
+                    const validator = euphemize(validator_at(element_nr));
                     return property(element_nr, validator);
                 }),
                 true
@@ -330,26 +333,31 @@ function array(validator_array, length_validator, rest_validator) {
 }
 
 function object(zeroth, wunth, allow_strays = false) {
+
     function heterogeneous() {
         const required = coalesce(zeroth, {});
         const optional = coalesce(wunth, {});
-        return all_of(
-            [
-                function required_properties_validator(subject) {
+
+        function is_stray(key) {
+            return !owns(required, key) && !owns(optional, key);
+        }
+
+        return function heterogeneous_validator(subject) {
+            let violations = [];
 
 // Required properties must exist directly on the subject, not just in its
 // prototype chain. This ensures that JSON representations of valid subjects
 // include all required properties.
 
-                    return Object.keys(required).reduce(function (array, key) {
-                        return array.concat(
-                            Object.keys(subject).includes(key)
-                            ? property(key, euphemize(required[key]))(subject)
-                            : make_violation("missing_property_a", key)
-                        );
-                    }, []);
-                },
-                function optional_properties_validator(subject) {
+            Object.keys(required).forEach(function (key) {
+                if (owns(subject, key)) {
+                    violations = violations.concat(
+                        property(key, euphemize(required[key]))(subject)
+                    );
+                } else {
+                    violations.push(make_violation("missing_property_a", key));
+                }
+            });
 
 // Optional properties are trickier. When an optional property is missing from
 // the subject, there remains the possibility that it is buried somewhere in
@@ -361,34 +369,24 @@ function object(zeroth, wunth, allow_strays = false) {
 // missing property is indistinguishable from a property with a value of
 // undefined. I am ambivalent about this.
 
-                    return Object.keys(optional).reduce(function (array, key) {
-                        return array.concat(
-                            subject[key] !== undefined
-                            ? property(key, euphemize(optional[key]))(subject)
-                            : []
-                        );
-                    }, []);
-                },
-                (
-                    allow_strays
-                    ? any()
-                    : function stray_properties_validator(subject) {
-                        return Object.keys(
-                            subject
-                        ).filter(function is_stray(key) {
-                            return !(
-                                Object.keys(required).includes(key)
-                                || Object.keys(optional).includes(key)
-                            );
-                        }).map(function (key) {
-                            return make_violation("unexpected_property_a", key);
-                        });
-                    }
-                )
-            ],
-            true
-        );
+            Object.keys(optional).forEach(function (key) {
+                if (subject[key] !== undefined) {
+                    violations = violations.concat(
+                        property(key, euphemize(optional[key]))(subject)
+                    );
+                }
+            });
+            if (!allow_strays) {
+                violations.concat(
+                    Object.keys(subject).filter(is_stray).map(function (key) {
+                        return make_violation("unexpected_property_a", key);
+                    })
+                );
+            }
+            return violations;
+        };
     }
+
     function homogenous() {
         const key_validator = coalesce(zeroth, any());
         const value_validator = coalesce(wunth, any());
@@ -396,7 +394,7 @@ function object(zeroth, wunth, allow_strays = false) {
             return all_of(
                 Object.keys(subject).map(function (key) {
 
-// Returns a validator which validates both the key and the value of a single
+// Returns a validator that validates both the key and the value of a single
 // property.
 
                     return all_of([

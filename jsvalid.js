@@ -1,6 +1,6 @@
 // jsvalid.js
 // James Diacono
-// 2022-08-11
+// 2023-01-24
 
 // Public Domain
 
@@ -377,7 +377,7 @@ function object(zeroth, wunth, allow_strays = false) {
                 }
             });
             if (!allow_strays) {
-                violations.concat(
+                violations = violations.concat(
                     Object.keys(subject).filter(is_stray).map(function (key) {
                         return make_violation("unexpected_property_a", key);
                     })

@@ -1,6 +1,6 @@
 // jsvalid.js
 // James Diacono
-// 2024-09-03
+// 2025-03-14
 
 // Public Domain
 
@@ -17,20 +17,6 @@ const violation_messages = {
     unexpected_property_a: "Unexpected property '{a}'.",
     wrong_pattern: "Wrong pattern."
 };
-const rx_variable = /\{([^{}]*)\}/g;
-
-function interpolate(template, container) {
-    return template.replace(rx_variable, function (original, filling) {
-        try {
-            return String(container[filling]);
-        } catch (_) {
-
-// Objects with a null prototype are unprintable. Perhaps other values are too.
-
-            return original;
-        }
-    });
-}
 
 function coalesce(left, right) {
 
@@ -44,16 +30,13 @@ function coalesce(left, right) {
     );
 }
 
-function make_violation(code, ...exhibits) {
+function make_violation(code, a) {
     let violation = {
-        message: interpolate(
-            violation_messages[code],
-            {a: exhibits[0]}
-        ),
+        message: violation_messages[code].replace("{a}", a),
         code
     };
-    if (exhibits.length > 0) {
-        violation.a = exhibits[0];
+    if (a !== undefined) {
+        violation.a = a;
     }
     return violation;
 }
